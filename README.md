@@ -21,6 +21,7 @@
 - [IBM Quantum setup (optional)](#ibm-quantum-setup-optional)
 - [Running experiments](#running-experiments)
 - [Running the dashboard](#running-the-dashboard)
+- [Running the live web app (FastAPI + HTML5)](#running-the-live-web-app-fastapi--html5)
 - [Notebooks](#notebooks)
 - [Benchmark methodology](#benchmark-methodology)
 - [Results](#results)
@@ -103,7 +104,9 @@ quantum-credit-card-fraud-detection/
 │   ├── explainability/   # classical (SHAP/importance) + quantum (circuit transparency)
 │   ├── experiments/      # run_classical/quantum/hybrid/noise/temporal.py
 │   └── utils/            # logging, reproducibility, experiment tracker
-├── dashboard/            # 9-page Streamlit app
+├── dashboard/            # 9-page Streamlit research dashboard
+├── api/                  # FastAPI backend for the live web app
+├── frontend/             # HTML5/CSS/JS frontend served by the FastAPI backend
 ├── experiments/          # results/ (JSON + registry.csv), figures/, circuits/, logs/
 ├── tests/                # 74 tests, no IBM credentials required
 ├── docs/                 # architecture, methodology, experiments, research_gaps, reproducibility
@@ -204,6 +207,44 @@ export). Dark cybersecurity theme; every page carries the
 "Research Prototype" banner and shows only anonymized/synthetic
 transaction IDs — never real card data. All 9 pages verified via
 Streamlit's `AppTest` framework with zero exceptions.
+
+## Running the live web app (FastAPI + HTML5)
+
+Alongside the Streamlit research dashboard, the project ships a second,
+production-shaped web app: a **FastAPI** JSON backend (`api/`) serving a
+plain **HTML5/CSS/JS** single-page frontend (`frontend/`) — no build step,
+no framework, just `fetch()` calls against the API.
+
+```bash
+uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+# or:
+python -m api.main
+```
+
+Then open **http://localhost:8000/**. On first request the backend trains a
+small demo QGFDA pipeline in the background (~30-60s, prewarmed at startup)
+and caches it in-process; every page thereafter calls a real endpoint —
+nothing is pre-baked or faked:
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/health` | Liveness check |
+| `GET /api/overview` | Executive summary metrics (PR-AUC, recall, decision mix, routing %) |
+| `GET /api/transactions` | Live transaction table (filterable by decision / quantum-routed) |
+| `POST /api/transactions/score` | Draws a fresh synthetic transaction and scores it through the **live** QGFDA pipeline end-to-end |
+| `GET /api/quantum/summary` | Current demo pipeline's qubits/shots/optimizer/backend |
+| `POST /api/quantum/circuit` | Builds a feature-map+ansatz circuit on demand and returns a rendered PNG (base64) + depth/gate metrics |
+| `POST /api/feature-selection` | Runs QAFS across requested feature counts |
+| `GET /api/drift` | PSI/KS drift report on the demo data |
+| `POST /api/drift/robustness` | Controlled Amount-perturbation sensitivity sweep |
+| `GET /api/experiments` | The full experiment registry, as JSON |
+| `GET /api/experiments/export.csv` | The registry as a CSV download |
+| `POST /api/experiments/run` | Explicitly triggers one experiment run (never automatic) |
+
+Interactive OpenAPI docs are auto-generated at `/docs`. Configure host/port/
+CORS via `.env` (`API_HOST`, `API_PORT`, `API_RELOAD`, `API_CORS_ORIGINS` —
+see `.env.example`); tighten `API_CORS_ORIGINS` before exposing this beyond
+localhost. Covered by `tests/test_api.py` using FastAPI's `TestClient`.
 
 ## Notebooks
 

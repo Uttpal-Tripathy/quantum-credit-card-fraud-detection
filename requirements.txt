@@ -30,6 +30,11 @@ plotly>=5.22,<6.0
 # --- Dashboard ---
 streamlit>=1.37,<2.0
 
+# --- Live web app (FastAPI backend + HTML5 frontend) ---
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+python-multipart>=0.0.9,<1.0
+
 # --- Quantum computing (Qiskit 2.x API) ---
 qiskit>=1.3,<3.0
 qiskit-machine-learning>=0.8,<1.0

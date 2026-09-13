@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QGFDA — Quantum Financial Fraud Intelligence Center</title>
+<link rel="stylesheet" href="/css/style.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="app-shell">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-icon">🛡️</span>
+      <div>
+        <div class="brand-title">QUANTUM FINANCIAL FRAUD INTELLIGENCE CENTER</div>
+        <div class="brand-sub">Quantum-Gated Fraud Detection Architecture (QGFDA) — Live Demo</div>
+      </div>
+    </div>
+    <div id="conn-status" class="conn-status conn-pending">connecting…</div>
+  </header>
+
+  <div class="banner">
+    🔒 <b>Research Prototype — Not for Production Financial Authorization.</b>
+    All transaction data shown here is synthetic or anonymized. No real card numbers, CVVs, account numbers, or PII are ever displayed.
+  </div>
+
+  <nav class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="transactions">Live Transactions</button>
+    <button class="tab-btn" data-tab="quantum">Quantum Lab</button>
+    <button class="tab-btn" data-tab="features">Feature Selection</button>
+    <button class="tab-btn" data-tab="drift">Drift &amp; Robustness</button>
+    <button class="tab-btn" data-tab="results">Research Results</button>
+  </nav>
+
+  <main class="content">
+
+    <section id="tab-overview" class="tab-panel active">
+      <div class="grid grid-4" id="overview-metrics"></div>
+      <div class="grid grid-2">
+        <div class="card">
+          <h3>Decision Distribution</h3>
+          <canvas id="chart-decisions" height="220"></canvas>
+        </div>
+        <div class="card">
+          <h3>Routing Split</h3>
+          <canvas id="chart-routing" height="220"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Research Hypothesis</h3>
+        <p class="quote">"Selective quantum-classical inference may improve the fraud-detection
+        accuracy-false-positive-resource trade-off for difficult transactions under constrained
+        quantum resources."</p>
+        <p class="muted">This project does not assume or claim quantum advantage — every number on
+        this page is produced by a real, running pipeline (Qiskit Aer simulator + classical models),
+        not simulated for show.</p>
+      </div>
+    </section>
+
+    <section id="tab-transactions" class="tab-panel">
+      <div class="card controls-row">
+        <label>Filter decision:
+          <select id="tx-decision-filter">
+            <option value="">All</option>
+            <option value="APPROVE">APPROVE</option>
+            <option value="REVIEW">REVIEW</option>
+            <option value="BLOCK">BLOCK</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="tx-routed-only" /> Quantum-routed only</label>
+        <button id="tx-refresh" class="btn">Refresh table</button>
+        <span class="spacer"></span>
+        <label>Amount multiplier: <span id="tx-amount-mult-val">1.0×</span>
+          <input type="range" id="tx-amount-mult" min="0.1" max="10" step="0.1" value="1.0" />
+        </label>
+        <button id="tx-score-new" class="btn btn-primary">▶ Score New Live Transaction</button>
+      </div>
+      <div id="tx-score-result" class="card result-card hidden"></div>
+      <div class="card">
+        <table class="data-table" id="tx-table">
+          <thead>
+            <tr><th>Transaction ID</th><th>Amount</th><th>Classical Risk</th><th>Quantum Risk</th><th>Final Risk</th><th>Path</th><th>Decision</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-quantum" class="tab-panel">
+      <div class="grid grid-4" id="quantum-summary"></div>
+      <div class="card controls-row">
+        <label>Feature map:
+          <select id="q-feature-map"><option value="zz">zz</option><option value="z">z</option><option value="pauli">pauli</option></select>
+        </label>
+        <label>Ansatz:
+          <select id="q-ansatz"><option value="real_amplitudes">real_amplitudes</option><option value="efficient_su2">efficient_su2</option><option value="two_local">two_local</option></select>
+        </label>
+        <label>Qubits: <input type="number" id="q-qubits" value="4" min="2" max="10" /></label>
+        <label>Reps: <input type="number" id="q-reps" value="2" min="1" max="4" /></label>
+        <button id="q-build" class="btn btn-primary">Build Circuit</button>
+      </div>
+      <div class="card" id="q-circuit-card">
+        <h3>Circuit</h3>
+        <div id="q-circuit-metrics" class="muted"></div>
+        <img id="q-circuit-image" alt="Quantum circuit diagram" />
+      </div>
+    </section>
+
+    <section id="tab-features" class="tab-panel">
+      <div class="card controls-row">
+        <label>Candidate feature counts (comma-separated):
+          <input type="text" id="fs-counts" value="2,4,6,8" />
+        </label>
+        <button id="fs-run" class="btn btn-primary">Run QAFS</button>
+      </div>
+      <div class="grid grid-2">
+        <div class="card"><h3>PR-AUC vs Feature Count</h3><canvas id="chart-fs-praUC" height="240"></canvas></div>
+        <div class="card"><h3>QAFS Objective J vs Feature Count</h3><canvas id="chart-fs-J" height="240"></canvas></div>
+      </div>
+      <div class="card">
+        <table class="data-table" id="fs-table">
+          <thead><tr><th>Features</th><th>Qubits</th><th>PR-AUC</th><th>FPR</th><th>Depth</th><th>Latency (ms)</th><th>J</th><th>Solver</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-drift" class="tab-panel">
+      <div class="grid grid-4" id="drift-metrics"></div>
+      <div class="card"><h3>Amount Distribution: Reference vs Current</h3><canvas id="chart-drift-hist" height="220"></canvas></div>
+      <div class="card controls-row">
+        <label>Perturbation magnitude: <span id="rb-pct-val">10%</span>
+          <input type="range" id="rb-pct" min="1" max="50" step="1" value="10" />
+        </label>
+        <button id="rb-run" class="btn btn-primary">Run Perturbation Sweep</button>
+      </div>
+      <div class="grid grid-2">
+        <div class="card metric-card" id="rb-metrics"></div>
+        <div class="card"><h3>Score Change Distribution</h3><canvas id="chart-rb-hist" height="220"></canvas></div>
+      </div>
+    </section>
+
+    <section id="tab-results" class="tab-panel">
+      <div class="card controls-row">
+        <select id="rx-dataset"><option>ulb</option><option>ieee_cis</option><option>paysim</option><option>banksim</option><option>fraud_detection_handbook</option></select>
+        <select id="rx-type">
+          <option value="classical">classical</option>
+          <option value="quantum">quantum</option>
+          <option value="hybrid_ablation">hybrid_ablation</option>
+          <option value="noise_sweep">noise_sweep</option>
+          <option value="temporal">temporal</option>
+        </select>
+        <input type="text" id="rx-model" placeholder="model (e.g. xgboost, vqc)" value="xgboost" />
+        <input type="number" id="rx-qubits" placeholder="qubits" value="4" min="2" max="10" />
+        <button id="rx-run" class="btn btn-primary">▶ Run Experiment</button>
+        <span class="spacer"></span>
+        <a id="rx-export" class="btn" href="/api/experiments/export.csv">⬇ Export CSV</a>
+        <button id="rx-refresh" class="btn">Refresh</button>
+      </div>
+      <div id="rx-run-status" class="card hidden"></div>
+      <div class="card">
+        <table class="data-table" id="rx-table">
+          <thead><tr><th>Model</th><th>Dataset</th><th>PR-AUC</th><th>Recall</th><th>F1</th><th>FPR</th><th>Qubits</th><th>Depth</th><th>Shots</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">QGFDA — Research prototype. Not for production financial authorization.</footer>
+</div>
+
+<script src="/js/api.js"></script>
+<script src="/js/app.js"></script>
+</body>
+</html>
