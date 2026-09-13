@@ -1,0 +1,1 @@
+"""QGFDA Streamlit dashboard package."""
