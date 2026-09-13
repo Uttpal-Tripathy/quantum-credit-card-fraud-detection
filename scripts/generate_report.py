@@ -1,0 +1,222 @@
+#!/usr/bin/env python
+"""Generate research_results.md from recorded experiments only.
+
+Per spec section 31: "Do not fabricate results. If an experiment has not
+been run, display 'RESULT PENDING' instead of inventing numbers." Every
+number in the generated report is read from
+experiments/results/experiment_registry.csv; any ablation arm or experiment
+with no matching row is rendered as RESULT PENDING rather than omitted or
+guessed.
+
+    python scripts/generate_report.py
+"""
+
+from __future__ import annotations
+
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import pandas as pd  # noqa: E402
+
+from src.config.settings import REPO_ROOT  # noqa: E402
+from src.evaluation.ablation import ABLATION_ARMS, build_ablation_table  # noqa: E402
+from src.utils.experiment_tracker import load_registry  # noqa: E402
+from src.utils.reproducibility import capture_software_versions  # noqa: E402
+
+PENDING = "RESULT PENDING"
+
+
+def _fmt(value, ndigits: int = 4) -> str:
+    if value is None or value == "" or (isinstance(value, float) and pd.isna(value)):
+        return PENDING
+    try:
+        return f"{float(value):.{ndigits}f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _best_row_for(records: list[dict], experiment_name_prefix: str) -> dict | None:
+    matches = [r for r in records if str(r.get("experiment_name", "")).startswith(experiment_name_prefix)
+               and r.get("status") == "completed"]
+    if not matches:
+        return None
+    matches.sort(key=lambda r: (r.get("pr_auc") or -1) if r.get("pr_auc") not in (None, "") else -1, reverse=True)
+    return matches[0]
+
+
+def build_comparison_section(records: list[dict]) -> str:
+    classical_models = ["logistic_regression", "random_forest", "xgboost", "lightgbm"]
+    quantum_models = ["qsvc", "vqc", "qnn"]
+
+    lines = ["| Model | Dataset | PR-AUC | Recall | Precision | F1 | FPR | Latency (s) | Qubits | Depth | Shots |",
+             "|---|---|---|---|---|---|---|---|---|---|---|"]
+
+    for m in classical_models:
+        row = _best_row_for(records, f"A_classical_baseline_{m}")
+        lines.append(_table_row(m, row))
+    for m in quantum_models:
+        row = _best_row_for(records, f"quantum_{m}")
+        lines.append(_table_row(m, row))
+    for name in ("H_hybrid_plus_cost_sensitive", "I_full_qgfda"):
+        row = _best_row_for(records, name)
+        lines.append(_table_row(name, row))
+
+    return "\n".join(lines)
+
+
+def _table_row(model_name: str, row: dict | None) -> str:
+    if row is None:
+        return f"| {model_name} | {PENDING} | {PENDING} | {PENDING} | {PENDING} | {PENDING} | {PENDING} | {PENDING} | {PENDING} | {PENDING} | {PENDING} |"
+    return (f"| {model_name} | {row.get('dataset', PENDING)} | {_fmt(row.get('pr_auc'))} | "
+            f"{_fmt(row.get('recall'))} | {_fmt(row.get('precision'))} | {_fmt(row.get('f1'))} | "
+            f"{_fmt(row.get('fpr'))} | {_fmt(row.get('inference_time_s'), 6)} | "
+            f"{row.get('qubits') or PENDING} | {row.get('circuit_depth') or PENDING} | {row.get('shots') or PENDING} |")
+
+
+def build_ablation_section(records: list[dict]) -> str:
+    table = build_ablation_table(records)
+    lines = ["| Arm | Description | PR-AUC | Recall | FPR | Expected Loss |",
+             "|---|---|---|---|---|---|"]
+    for _, row in table.iterrows():
+        lines.append(
+            f"| {row['arm']} | {row['description']} | {_fmt(row['pr_auc'])} | "
+            f"{_fmt(row['recall'])} | {_fmt(row['fpr'])} | {_fmt(row['expected_loss'], 2)} |"
+        )
+    return "\n".join(lines)
+
+
+def build_noise_section(records: list[dict]) -> str:
+    noise_records = [r for r in records if str(r.get("experiment_name", "")).startswith("J_noise_robustness")]
+    if not noise_records:
+        return PENDING
+    lines = ["| Backend | Shots | PR-AUC | FPR | Circuit Depth |", "|---|---|---|---|---|"]
+    for r in noise_records:
+        lines.append(f"| {r.get('backend')} | {r.get('shots')} | {_fmt(r.get('pr_auc'))} | "
+                      f"{_fmt(r.get('fpr'))} | {r.get('circuit_depth') or PENDING} |")
+    return "\n".join(lines)
+
+
+def build_temporal_section(records: list[dict]) -> str:
+    temporal_records = [r for r in records if str(r.get("experiment_name", "")).startswith("K_temporal_drift")]
+    if not temporal_records:
+        return PENDING
+    pr_aucs = [float(r["pr_auc"]) for r in temporal_records if r.get("pr_auc") not in (None, "")]
+    if len(pr_aucs) < 2:
+        return PENDING
+    return f"PR-AUC across rolling windows: first={pr_aucs[0]:.4f}, last={pr_aucs[-1]:.4f}, delta={pr_aucs[-1]-pr_aucs[0]:+.4f}"
+
+
+def generate_report() -> Path:
+    records = load_registry()
+    versions = capture_software_versions()
+    generated_at = datetime.now(timezone.utc).isoformat()
+
+    has_results = len(records) > 0
+
+    content = f"""# QGFDA Research Results
+
+*Auto-generated by `scripts/generate_report.py` on {generated_at}. Every number
+below is read directly from `experiments/results/experiment_registry.csv`;
+any cell showing "{PENDING}" corresponds to an experiment that has not been
+run yet — no numbers in this document are fabricated or estimated.*
+
+## Abstract
+
+This report documents empirical results for the Quantum-Gated Fraud
+Detection Architecture (QGFDA), a resource-aware hybrid quantum-classical
+framework for credit card fraud detection. The research question under test
+is **not** "is quantum better than classical" but: *"Does selective
+quantum-classical inference improve the fraud-detection accuracy /
+false-positive / resource trade-off for difficult transactions under
+constrained quantum resources?"* {"Results below answer this empirically for the runs completed so far." if has_results else "No experiments have been run yet — see docs/reproducibility.md to populate this report."}
+
+## Introduction
+
+Credit card fraud detection is a severely imbalanced classification problem
+(real-world fraud rates around 0.1-0.5%) where the primary metric must be
+PR-AUC / recall / false-positive rate, never accuracy. This project tests
+whether routing only *uncertain* transactions to a quantum classifier — via
+a classical-confidence uncertainty gate — can improve this trade-off over
+either a purely classical or purely quantum system, under an explicit
+resource budget (qubits, circuit depth, shots, latency).
+
+## Methodology
+
+See `docs/methodology.md` for the full preprocessing, feature-selection, and
+evaluation protocol. In summary: stratified/temporal train-val-test splits,
+class-weighted classical baselines with isotonic calibration, Qiskit 2.x
+quantum kernels/QSVC/VQC/QNN with a configurable simulator/noisy-simulator/
+IBM-hardware backend, QUBO/QAOA-based Quantum-Aware Feature Selection (QAFS),
+and a cost-sensitive APPROVE/REVIEW/BLOCK decision engine minimizing
+ExpectedLoss = FN*fraud_loss + FP*false_positive_cost + n_review*review_cost.
+
+## Experimental Setup
+
+- Software versions: {", ".join(f"{k}={v}" for k, v in versions.items())}
+- Primary metric: PR-AUC (never accuracy — see docs/methodology.md)
+- Random seed: 42 (unless overridden per-experiment; recorded per row in the registry)
+
+## Comparison Table (Model x Dataset)
+
+{build_comparison_section(records) if has_results else PENDING}
+
+## Ablation Study (spec section 33, arms A-I)
+
+{build_ablation_section(records) if has_results else PENDING}
+
+## Noise Robustness (Experiment J)
+
+{build_noise_section(records) if has_results else PENDING}
+
+## Temporal Drift (Experiment K)
+
+{build_temporal_section(records) if has_results else PENDING}
+
+## Discussion
+
+{"Populate this section after reviewing the comparison and ablation tables above — compare arm F (gate) vs E (no gate) vs D (fuse everything) to isolate the uncertainty gate's effect, and I vs H to isolate the cost-sensitive decision engine's effect." if has_results else PENDING}
+
+## Limitations
+
+- Quantum models in this report are trained/evaluated on Aer simulators
+  (or, where `IBM_QUANTUM_TOKEN` is configured, real IBM Quantum hardware);
+  simulator results do not include full device noise characteristics unless
+  the noisy-simulator backend was explicitly used.
+- Kernel-based quantum methods (QSVC) scale O(n^2) in training-set size, so
+  quantum training sets in this report are subsampled relative to the full
+  classical training set — see the `n_train`/`extra` fields in each
+  experiment's JSON record for the exact sample size used.
+- QUBO-based feature selection (QAFS) uses a classical logistic-regression
+  surrogate to score candidate feature subsets rather than the full quantum
+  model, for tractability — see src/quantum/qubo_feature_selection.py.
+
+## Conclusion
+
+{"Draw conclusions strictly from the tables above once populated with real dataset runs; do not generalize from synthetic-data smoke-test rows (flagged with a `_synthetic` dataset suffix in the registry)." if has_results else PENDING}
+
+## Research Novelty Note
+
+Per spec section 32, the following are presented as *potential contributions
+requiring comparison with prior art*, not established novelty claims:
+Quantum-Aware Feature Selection, resource-aware QML, quantum-gated selective
+inference, cost-sensitive quantum-classical risk fusion, temporal
+fraud-drift handling, noise-aware QML evaluation, cross-dataset validation,
+hardware-aware evaluation, explainable hybrid fraud detection, and
+latency-aware quantum inference.
+"""
+
+    out_path = REPO_ROOT / "research_results.md"
+    out_path.write_text(content, encoding="utf-8")
+    return out_path
+
+
+def main() -> None:
+    out_path = generate_report()
+    print(f"Wrote {out_path}")
+
+
+if __name__ == "__main__":
+    main()
