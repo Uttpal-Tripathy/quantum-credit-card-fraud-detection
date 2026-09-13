@@ -126,7 +126,7 @@ def ks_drift_test(reference: np.ndarray, current: np.ndarray, alpha: float = 0.0
     """Two-sample Kolmogorov-Smirnov test for whether a feature's marginal
     distribution has shifted between a reference window and the current one."""
     statistic, p_value = stats.ks_2samp(reference, current)
-    return KSDriftResult(statistic=float(statistic), p_value=float(p_value), drifted=p_value < alpha)
+    return KSDriftResult(statistic=float(statistic), p_value=float(p_value), drifted=bool(p_value < alpha))
 
 
 def drift_status(psi: float, psi_warning: float = 0.1, psi_critical: float = 0.25) -> str:
