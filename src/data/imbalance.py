@@ -34,6 +34,44 @@ def compute_scale_pos_weight(y: pd.Series | np.ndarray) -> float:
     return float(n_neg / n_pos)
 
 
+def stratified_subsample(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_samples: int,
+    min_minority_samples: int = 2,
+    random_state: int = 42,
+) -> np.ndarray:
+    """Return indices for a subsample of size `n_samples` that preserves
+    class proportions AND guarantees at least `min_minority_samples` of the
+    minority class when available — plain `rng.choice` on a ~0.17%-fraud
+    dataset can (and does) draw zero fraud rows at small sample sizes, which
+    breaks every classifier that requires both classes (e.g. VQC/QNN raise
+    on single-class targets). Used wherever quantum models subsample the
+    training set for tractable circuit-evaluation cost."""
+    y = np.asarray(y)
+    n = len(y)
+    if n_samples >= n:
+        return np.arange(n)
+
+    rng = np.random.default_rng(random_state)
+    classes, counts = np.unique(y, return_counts=True)
+    minority_class = classes[np.argmin(counts)]
+
+    minority_idx_all = np.where(y == minority_class)[0]
+    majority_idx_all = np.where(y != minority_class)[0]
+
+    n_minority = min(len(minority_idx_all), max(min_minority_samples, round(n_samples * (len(minority_idx_all) / n))))
+    n_minority = min(n_minority, n_samples)
+    n_majority = n_samples - n_minority
+
+    minority_pick = rng.choice(minority_idx_all, size=n_minority, replace=False)
+    majority_pick = rng.choice(majority_idx_all, size=min(n_majority, len(majority_idx_all)), replace=False)
+
+    idx = np.concatenate([minority_pick, majority_pick])
+    rng.shuffle(idx)
+    return idx
+
+
 def resample_train_only(
     X: np.ndarray,
     y: np.ndarray,

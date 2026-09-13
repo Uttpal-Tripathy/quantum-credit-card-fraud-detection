@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from src.data.imbalance import stratified_subsample
 from src.hybrid.cost_sensitive_decision import (
     CostModel,
     ThresholdConfig,
@@ -108,10 +109,9 @@ class QGFDA:
         logger.info(f"Fitting classical fast path on {len(y_train)} training rows.")
         self.classical_model.fit(X_train, y_train)
 
-        rng = np.random.default_rng(self.config.random_state)
         sample_size = self.config.quantum_train_sample_size
         if sample_size is not None and sample_size < len(y_train):
-            idx = rng.choice(len(y_train), size=sample_size, replace=False)
+            idx = stratified_subsample(X_train, y_train, sample_size, random_state=self.config.random_state)
         else:
             idx = np.arange(len(y_train))
 

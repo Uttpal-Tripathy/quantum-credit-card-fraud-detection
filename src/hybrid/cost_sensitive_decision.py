@@ -29,6 +29,18 @@ class CostModel:
     false_positive_cost: float = 25.0
     review_cost: float = 5.0
 
+    @classmethod
+    def from_config(cls, cost_config: dict) -> "CostModel":
+        """Build from configs/experiments.yaml's `cost_model` block, which
+        also carries optional `block_threshold`/`review_threshold` overrides
+        consumed elsewhere (by optimize_thresholds) — silently ignore any
+        keys this dataclass doesn't define."""
+        return cls(
+            fraud_loss=cost_config.get("fraud_loss", 500.0),
+            false_positive_cost=cost_config.get("false_positive_cost", 25.0),
+            review_cost=cost_config.get("review_cost", 5.0),
+        )
+
 
 @dataclass
 class ThresholdConfig:

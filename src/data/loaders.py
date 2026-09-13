@@ -206,8 +206,17 @@ def load_synthetic(dataset_key: str = "ulb", n_samples: int = 5000, fraud_rate: 
             rng.gamma(shape=2.0, scale=40.0, size=n_legit),
             rng.gamma(shape=2.0, scale=150.0, size=n_fraud),
         ])
-        time = np.sort(rng.uniform(0, 172792, size=n_samples))
         label = np.concatenate([np.zeros(n_legit), np.ones(n_fraud)])
+
+        # Shuffle (V, amount, label) together BEFORE assigning a monotonic
+        # Time column, so fraud is scattered uniformly across the time range
+        # instead of clustering at the end (which would happen if sorted
+        # Time were assigned positionally to this legit-then-fraud-ordered
+        # array) — that spurious label<->time correlation previously made
+        # every early rolling-window fold contain zero fraud rows.
+        shuffle_idx = rng.permutation(n_samples)
+        V, amount, label = V[shuffle_idx], amount[shuffle_idx], label[shuffle_idx]
+        time = np.sort(rng.uniform(0, 172792, size=n_samples))
 
         frame = pd.DataFrame(V, columns=[f"V{i}" for i in range(1, 29)])
         frame.insert(0, "Time", time)
