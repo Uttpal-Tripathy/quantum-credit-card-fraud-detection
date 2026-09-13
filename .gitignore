@@ -1,0 +1,49 @@
+# Environments
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets
+.env
+
+# Data (never commit raw financial data)
+data/raw/*
+!data/raw/.gitkeep
+data/interim/*
+!data/interim/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# Models (can be large; regenerate via experiments)
+models/*.joblib
+models/*.pkl
+models/*.json
+!models/.gitkeep
+
+# Experiment artifacts
+experiments/results/*
+!experiments/results/.gitkeep
+!experiments/results/experiment_registry.csv
+experiments/figures/*
+!experiments/figures/.gitkeep
+experiments/circuits/*
+!experiments/circuits/.gitkeep
+experiments/logs/*
+!experiments/logs/.gitkeep
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

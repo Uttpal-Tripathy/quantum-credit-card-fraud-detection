@@ -1,0 +1,112 @@
+# Dataset registry for QGFDA. Paths are relative to the repository root and
+# are never hard-coded into source — src/data/loaders.py reads this file.
+# None of these files ship with the repo; download them per docs/reproducibility.md
+# (or scripts/download_data.py) and place them at the paths below.
+
+datasets:
+  ulb:
+    name: "ULB Credit Card Fraud"
+    source_url: "https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud"
+    path: data/raw/creditcard.csv
+    target: Class
+    id_column: null
+    time_column: Time
+    amount_column: Amount
+    categorical_features: []
+    drop_columns: []
+    primary_benchmark: true
+    notes: >
+      284,807 transactions, 492 frauds (0.172%). Features V1-V28 are PCA
+      components; Time and Amount are the only raw features. No categorical
+      encoding needed. Primary reproducibility benchmark for this project.
+
+  ieee_cis:
+    name: "IEEE-CIS Fraud Detection"
+    source_url: "https://www.kaggle.com/competitions/ieee-fraud-detection/data"
+    transaction_path: data/raw/train_transaction.csv
+    identity_path: data/raw/train_identity.csv
+    join_key: TransactionID
+    target: isFraud
+    id_column: TransactionID
+    time_column: TransactionDT
+    amount_column: TransactionAmt
+    categorical_features:
+      - ProductCD
+      - card4
+      - card6
+      - P_emaildomain
+      - R_emaildomain
+      - M1
+      - M2
+      - M3
+      - M4
+      - M5
+      - M6
+      - M7
+      - M8
+      - M9
+      - DeviceType
+      - DeviceInfo
+    drop_columns: []
+    primary_benchmark: false
+    notes: >
+      High-dimensional (400+ columns after join), heavy categorical content,
+      substantial missingness. Used for generalization / feature-selection
+      experiments, not the primary benchmark.
+
+  paysim:
+    name: "PaySim Synthetic Mobile Money"
+    source_url: "https://www.kaggle.com/datasets/ealaxi/paysim1"
+    path: data/raw/PS_20174392719_1491204439457_log.csv
+    target: isFraud
+    id_column: null
+    time_column: step
+    amount_column: amount
+    categorical_features:
+      - type
+    drop_columns:
+      - isFlaggedFraud   # rule-based label that leaks the fraud outcome
+      - nameOrig
+      - nameDest
+    primary_benchmark: false
+    notes: >
+      Large-scale synthetic data with a `step` (hour) time column, well
+      suited to temporal drift / rolling-window experiments. isFlaggedFraud
+      is dropped by default because it is a business-rule flag derived from
+      the same information used to construct the fraud label (leakage risk).
+
+  banksim:
+    name: "BankSim"
+    source_url: "https://www.kaggle.com/datasets/ealaxi/banksim1"
+    path: data/raw/bs140513_032310.csv
+    target: fraud
+    id_column: null
+    time_column: step
+    amount_column: amount
+    categorical_features:
+      - customer
+      - age
+      - gender
+      - merchant
+      - category
+    drop_columns: []
+    primary_benchmark: false
+    notes: >
+      Agent-based simulation with customer/merchant identifiers, useful for
+      behavioral and network-inspired feature engineering experiments.
+
+  fraud_detection_handbook:
+    name: "Fraud Detection Handbook simulator output"
+    source_url: "https://fraud-detection-handbook.github.io/fraud-detection-handbook/"
+    path: data/raw/fdh_simulated_transactions.csv
+    target: TX_FRAUD
+    id_column: TRANSACTION_ID
+    time_column: TX_DATETIME
+    amount_column: TX_AMOUNT
+    categorical_features: []
+    drop_columns:
+      - TX_FRAUD_SCENARIO   # reveals which synthetic fraud rule generated the label
+    primary_benchmark: false
+    notes: >
+      Generate via the handbook's simulator (see docs/reproducibility.md) for
+      fully controlled, reproducible temporal-drift and calibration studies.

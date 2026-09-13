@@ -1,0 +1,60 @@
+# Experiment-level configuration: hybrid gating, cost model, evaluation.
+
+evaluation:
+  random_seed: 42
+  primary_metric: pr_auc     # never accuracy — see docs/methodology.md
+  test_size: 0.2
+  validation_size: 0.1
+  n_cv_folds: 5
+
+hybrid:
+  gate_threshold: 0.80        # classical confidence >= threshold -> classical decision
+  gate_risk_band: [0.15, 0.85]  # classical score inside this band is "uncertain"
+  fusion_method: weighted      # weighted | confidence_weighted | logistic_stacking | gbm_stacking | learned_gate
+  fusion_weights:
+    classical: 0.5
+    quantum: 0.5
+  max_quantum_fraction: 0.25   # resource cap: never route more than this fraction to QML
+
+cost_model:
+  fraud_loss: 500.0            # average $ lost per undetected fraud (false negative)
+  false_positive_cost: 25.0    # customer friction / support cost per false positive
+  review_cost: 5.0             # analyst cost per manual review
+  block_threshold: null        # if null, optimized from expected loss curve
+  review_threshold: null       # if null, optimized from expected loss curve
+
+temporal:
+  n_folds: 5
+  train_window_fraction: 0.6
+  step_fraction: 0.1
+
+drift:
+  psi_warning: 0.1
+  psi_critical: 0.25
+  ks_alpha: 0.01
+
+feature_selection:
+  candidate_counts: [2, 4, 6, 8, 10, 12, 16]
+  methods: [all_features, mutual_information, rfe, pca, qafs]
+  qafs_weights:      # J = a*(1-PR_AUC) + b*FPR + c*ExpectedLoss + d*QubitCost + e*CircuitDepth + f*Latency
+    alpha: 1.0
+    beta: 0.5
+    gamma: 0.2
+    delta: 0.3
+    epsilon: 0.2
+    zeta: 0.2
+
+experiment_matrix:
+  - id: A_classical_baseline
+  - id: B_quantum_kernel
+  - id: C_qsvc
+  - id: D_vqc
+  - id: E_qnn
+  - id: F_classical_feature_selection
+  - id: G_quantum_aware_feature_selection
+  - id: H_classical_quantum_fusion
+  - id: I_quantum_gated_hybrid
+  - id: J_noise_robustness
+  - id: K_temporal_drift
+  - id: L_cross_dataset
+  - id: M_ibm_hardware

@@ -1,0 +1,46 @@
+# Classical baseline model hyperparameters.
+# random_state fields are overridden by evaluation.random_seed in experiments.yaml
+# unless explicitly set here.
+
+logistic_regression:
+  penalty: l2
+  C: 1.0
+  class_weight: balanced
+  max_iter: 2000
+  solver: lbfgs
+
+random_forest:
+  n_estimators: 300
+  max_depth: 12
+  min_samples_leaf: 5
+  class_weight: balanced_subsample
+  n_jobs: -1
+
+xgboost:
+  n_estimators: 400
+  max_depth: 6
+  learning_rate: 0.05
+  subsample: 0.8
+  colsample_bytree: 0.8
+  eval_metric: aucpr
+  tree_method: hist
+  # scale_pos_weight computed at runtime from class balance unless set here
+  scale_pos_weight: null
+
+lightgbm:
+  n_estimators: 400
+  max_depth: -1
+  num_leaves: 63
+  learning_rate: 0.05
+  subsample: 0.8
+  colsample_bytree: 0.8
+  objective: binary
+  is_unbalance: true
+
+calibration:
+  method: isotonic   # isotonic | sigmoid
+  cv: 3
+
+threshold_tuning:
+  method: expected_loss   # expected_loss | f1 | youden_j
+  search_grid_points: 200

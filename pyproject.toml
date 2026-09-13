@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qgfda"
+version = "0.1.0"
+description = "Quantum-Gated Fraud Detection Architecture (QGFDA): a resource-aware hybrid quantum-classical framework for credit card fraud detection"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+authors = [{ name = "QGFDA Research Project" }]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "hardware: marks tests that require real IBM Quantum hardware access (deselect with '-m \"not hardware\"')",
+    "slow: marks slow-running tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
