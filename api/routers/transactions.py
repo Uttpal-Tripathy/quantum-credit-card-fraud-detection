@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Query
 
-from api import services
+from api import db, services
+from api.live_feed import manager
 from api.schemas import ScoreRequest
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -19,7 +22,14 @@ def list_transactions(
 
 
 @router.post("/score")
-def score_transaction(payload: ScoreRequest) -> dict:
+async def score_transaction(payload: ScoreRequest) -> dict:
     """Draws a fresh synthetic transaction and runs it through the live
-    QGFDA pipeline end-to-end (real inference call, not a lookup)."""
-    return services.score_new_transaction(amount_multiplier=payload.amount_multiplier)
+    QGFDA pipeline end-to-end (real inference call, not a lookup).
+    Persisted and broadcast the same way as the automatic live feed, so a
+    manual score shows up in every connected client's real-time view and in
+    /api/transactions/live/recent history."""
+    record = services.score_new_transaction(amount_multiplier=payload.amount_multiplier)
+    record["created_at"] = datetime.now(timezone.utc).isoformat()
+    db.insert_transaction(record)
+    await manager.broadcast({"type": "transaction", "data": record, "source": "manual"})
+    return record

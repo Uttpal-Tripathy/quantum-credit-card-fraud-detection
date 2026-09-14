@@ -2,9 +2,10 @@
 
 *A Resource-Aware Hybrid Quantum-Classical Framework for Credit Card Fraud Detection*
 
-[![Tests](https://img.shields.io/badge/tests-74%20passing-brightgreen)](tests/)
+[![Tests](https://img.shields.io/badge/tests-95%20passing-brightgreen)](tests/)
 [![Qiskit](https://img.shields.io/badge/Qiskit-2.5-6929c4)](https://www.ibm.com/quantum/qiskit)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)](pyproject.toml)
+[![FastAPI](https://img.shields.io/badge/FastAPI-live%20%2B%20real--time-009688)](api/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
 > **Research Prototype — Not for Production Financial Authorization.**
@@ -22,6 +23,7 @@
 - [Running experiments](#running-experiments)
 - [Running the dashboard](#running-the-dashboard)
 - [Running the live web app (FastAPI + HTML5)](#running-the-live-web-app-fastapi--html5)
+- [Production deployment](#production-deployment)
 - [Notebooks](#notebooks)
 - [Benchmark methodology](#benchmark-methodology)
 - [Results](#results)
@@ -221,17 +223,24 @@ uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
 python -m api.main
 ```
 
-Then open **http://localhost:8000/**. On first request the backend trains a
-small demo QGFDA pipeline in the background (~30-60s, prewarmed at startup)
-and caches it in-process; every page thereafter calls a real endpoint —
-nothing is pre-baked or faked:
+Then open **http://localhost:8000/**. On first request (or on a cold start
+with no persisted model yet) the backend trains a small demo QGFDA pipeline
+in the background (~30-60s, prewarmed at startup) and **persists it to
+`models/demo_pipeline/`** (classical model + preprocessing transformer via
+joblib, the trained VQC's weights via Qiskit's own `to_dill`/`from_dill`);
+every subsequent process restart warm-loads those artifacts instead of
+retraining — verified to cut cold start from ~35s to ~1.3s. Every page calls
+a real endpoint — nothing is pre-baked or faked:
 
 | Endpoint | What it does |
 |---|---|
-| `GET /api/health` | Liveness check |
+| `GET /api/health` | Liveness probe — 200 as soon as the process is up |
+| `GET /api/ready` | Readiness probe — 200 only once the demo pipeline has finished warming up; 503 otherwise, never blocks |
 | `GET /api/overview` | Executive summary metrics (PR-AUC, recall, decision mix, routing %) |
-| `GET /api/transactions` | Live transaction table (filterable by decision / quantum-routed) |
-| `POST /api/transactions/score` | Draws a fresh synthetic transaction and scores it through the **live** QGFDA pipeline end-to-end |
+| `WS /ws/live` | **Real-time push feed** — a fresh synthetic transaction is scored through the live pipeline and broadcast to every connected client roughly every `LIVE_FEED_INTERVAL_SECONDS` |
+| `GET /api/transactions/live/recent` | Recent live-feed history from SQLite (backfills the table for clients that connect after the fact) |
+| `GET /api/transactions/live/status` | Active WebSocket connection count + total transactions recorded |
+| `POST /api/transactions/score` | Draws a fresh synthetic transaction, scores it through the **live** QGFDA pipeline end-to-end, persists it, and broadcasts it to every connected WebSocket client |
 | `GET /api/quantum/summary` | Current demo pipeline's qubits/shots/optimizer/backend |
 | `POST /api/quantum/circuit` | Builds a feature-map+ansatz circuit on demand and returns a rendered PNG (base64) + depth/gate metrics |
 | `POST /api/feature-selection` | Runs QAFS across requested feature counts |
@@ -241,10 +250,69 @@ nothing is pre-baked or faked:
 | `GET /api/experiments/export.csv` | The registry as a CSV download |
 | `POST /api/experiments/run` | Explicitly triggers one experiment run (never automatic) |
 
-Interactive OpenAPI docs are auto-generated at `/docs`. Configure host/port/
-CORS via `.env` (`API_HOST`, `API_PORT`, `API_RELOAD`, `API_CORS_ORIGINS` —
-see `.env.example`); tighten `API_CORS_ORIGINS` before exposing this beyond
-localhost. Covered by `tests/test_api.py` using FastAPI's `TestClient`.
+The frontend's **Live Transactions** tab opens the WebSocket on page load, so
+new transactions stream in and highlight automatically with zero polling —
+open two browser tabs side by side and score a transaction in one to watch
+it appear in both in real time.
+
+Interactive OpenAPI docs are auto-generated at `/docs` (disabled when
+`ENVIRONMENT=production`). Configure host/port/CORS/environment via `.env`
+(`ENVIRONMENT`, `API_HOST`, `API_PORT`, `API_RELOAD`, `API_CORS_ORIGINS`,
+`LIVE_FEED_INTERVAL_SECONDS`, `RATE_LIMIT_PER_MINUTE` — see `.env.example`);
+tighten `API_CORS_ORIGINS` before exposing this beyond localhost. Every
+route — including the WebSocket feed — is covered by `tests/test_api.py`
+(21 tests) using FastAPI's `TestClient`, and was independently re-verified
+against a real running `uvicorn` process with a real WebSocket client.
+
+## Production deployment
+
+The API ships with the hardening a real deployment needs, not just a demo
+toggle:
+
+- **Persistence, not retraining on every restart** — see the cold-start note
+  above (`api/model_store.py`).
+- **Real-time transaction history survives restarts** — every live-feed and
+  manually-scored transaction is written to SQLite (`api/db.py`, WAL mode),
+  not held only in memory.
+- **Readiness vs liveness** — `/api/health` (liveness) and `/api/ready`
+  (readiness) are separate, standard for a container orchestrator's health
+  checks; `/api/ready` never itself triggers or blocks on a build.
+- **Rate limiting** — an in-memory fixed-window limiter
+  (`RATE_LIMIT_PER_MINUTE`, default 20/min per client IP) protects the
+  genuinely expensive endpoints (`/api/experiments/run`,
+  `/api/quantum/circuit`, `/api/feature-selection`) from being knocked over
+  by a request flood.
+- **Structured request logging** — every request is logged as
+  `METHOD path -> status (latency_ms)`.
+- **Environment-gated docs/errors** — `ENVIRONMENT=production` disables
+  `/docs`/`/redoc`/`/openapi.json` and strips internal exception details
+  from 500 responses (a global exception handler still returns a clean JSON
+  error envelope instead of an unhandled traceback).
+- **Thread-safe by construction** — matplotlib is forced to the
+  non-interactive `Agg` backend (`api/services.py`), since FastAPI runs sync
+  route handlers in worker threads and the GUI backend crashed under
+  concurrent circuit-rendering requests during testing.
+
+Run with Docker:
+
+```bash
+docker compose up --build
+```
+
+This builds the image (`Dockerfile`, non-root user, healthcheck baked in),
+binds port 8000, and mounts named volumes for `models/` and `api/data/` so
+the trained pipeline and live-feed database persist across container
+rebuilds. Copy `.env.example` to `.env` first and set `API_CORS_ORIGINS` to
+your real frontend origin(s) before exposing this beyond localhost.
+
+**Scaling note**: the demo-pipeline singleton and WebSocket connection
+manager live in this process's memory, so run exactly **one** uvicorn worker
+per container (already the Dockerfile's default) and scale out with
+multiple containers behind a load balancer with sticky WebSocket routing —
+raising `--workers` inside a single container will NOT share that state
+correctly across workers. Moving the connection manager to a pub/sub broker
+(e.g. Redis) is the natural next step for true horizontal scaling; that is
+not implemented here and is called out honestly rather than glossed over.
 
 ## Notebooks
 

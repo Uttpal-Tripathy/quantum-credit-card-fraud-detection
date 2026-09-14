@@ -39,8 +39,8 @@ flowchart TD
 | Experiments | `src/experiments/*.py` | Orchestration: runs a pipeline end-to-end and records results |
 | Utils | `src/utils/*.py` | Logging, reproducibility (seeds + software versions), experiment tracker (JSON + CSV registry) |
 | Dashboard | `dashboard/` | 9-page Streamlit research/demo UI |
-| Live web app (API) | `api/*.py` | FastAPI backend: routers wrap the same `src/` pipeline behind JSON endpoints, plus a cached in-process demo `QGFDA` singleton (`api/services.py`) |
-| Live web app (UI) | `frontend/` | Static HTML5/CSS/vanilla-JS single-page app served by the FastAPI backend, consuming its JSON API |
+| Live web app (API) | `api/*.py` | FastAPI backend: routers wrap the same `src/` pipeline behind JSON endpoints, a cached in-process demo `QGFDA` singleton (`api/services.py`) persisted to disk (`api/model_store.py`), a SQLite-backed live transaction log (`api/db.py`), and a WebSocket broadcaster driving the real-time feed (`api/live_feed.py`) |
+| Live web app (UI) | `frontend/` | Static HTML5/CSS/vanilla-JS single-page app served by the FastAPI backend; opens `/ws/live` on load for a real-time push feed instead of polling |
 | Scripts | `scripts/*.py` | Thin CLIs over `src/experiments/*` |
 
 ## Backend selection (simulator -> noisy -> hardware)

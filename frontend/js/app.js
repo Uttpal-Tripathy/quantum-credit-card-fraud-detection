@@ -48,7 +48,7 @@ const tabLoaded = {};
 function onTabShown(tab) {
   if (tabLoaded[tab]) return;
   tabLoaded[tab] = true;
-  if (tab === "transactions") loadTransactions();
+  if (tab === "transactions") renderTransactionsTable();
   if (tab === "quantum") loadQuantumTab();
   if (tab === "features") runFeatureSelection();
   if (tab === "drift") loadDrift();
@@ -107,27 +107,103 @@ async function loadOverview() {
 }
 
 // ------------------------------------------------------- transactions ----
+// Real-time: a WebSocket connection (/ws/live) pushes freshly-scored
+// synthetic transactions as they happen. `liveRows` is the client-side
+// buffer rendered into the table; REST is only used once at load time to
+// backfill recent history from before this page connected.
 
-async function loadTransactions() {
-  const tbody = document.querySelector("#tx-table tbody");
-  tbody.innerHTML = `<tr><td colspan="7">Loading…</td></tr>`;
+const MAX_LIVE_ROWS = 150;
+let liveRows = [];
+let liveSocket = null;
+let liveReconnectDelayMs = 1000;
+
+function setLiveBadge(status) {
+  const el = document.getElementById("live-feed-badge");
+  const map = {
+    connecting: ["● connecting…", "pill"],
+    live: ["🟢 LIVE", "pill pill-approve"],
+    error: ["🔴 disconnected — retrying…", "pill pill-block"],
+  };
+  const [text, cls] = map[status] || map.connecting;
+  el.textContent = text;
+  el.className = cls;
+}
+
+function rowMatchesFilters(row) {
   const decision = document.getElementById("tx-decision-filter").value;
   const routedOnly = document.getElementById("tx-routed-only").checked;
-  try {
-    const rows = await API.transactions({ limit: 50, ...(decision ? { decision } : {}), routed_only: routedOnly });
-    tbody.innerHTML = rows.map((r) => `
-      <tr>
-        <td>${r.transaction_id}</td>
-        <td>${fmtMoney(r.amount)}</td>
-        <td>${fmtNum(r.classical_risk)}</td>
-        <td>${r.quantum_risk == null ? "—" : fmtNum(r.quantum_risk)}</td>
-        <td>${fmtNum(r.final_risk)}</td>
-        <td>${r.routed_to_quantum ? "🔮 quantum" : "⚡ classical"}</td>
-        <td>${decisionPill(r.decision)}</td>
-      </tr>`).join("") || `<tr><td colspan="7">No transactions match this filter.</td></tr>`;
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="7">Failed to load: ${err.message}</td></tr>`;
+  if (decision && row.decision !== decision) return false;
+  if (routedOnly && !row.routed_to_quantum) return false;
+  return true;
+}
+
+function shortTime(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleTimeString();
+}
+
+function renderTransactionsTable() {
+  const tbody = document.querySelector("#tx-table tbody");
+  const visible = liveRows.filter(rowMatchesFilters);
+  if (!visible.length) {
+    tbody.innerHTML = `<tr><td colspan="8">Waiting for live transactions… (or none match the current filter)</td></tr>`;
+    return;
   }
+  tbody.innerHTML = visible.map((r, i) => `
+    <tr class="${i === 0 && r._fresh ? "row-fresh" : ""}">
+      <td>${r.transaction_id}</td>
+      <td>${shortTime(r.created_at)}</td>
+      <td>${fmtMoney(r.amount)}</td>
+      <td>${fmtNum(r.classical_risk)}</td>
+      <td>${r.quantum_risk == null ? "—" : fmtNum(r.quantum_risk)}</td>
+      <td>${fmtNum(r.final_risk)}</td>
+      <td>${r.routed_to_quantum ? "🔮 quantum" : "⚡ classical"}</td>
+      <td>${decisionPill(r.decision)}</td>
+    </tr>`).join("");
+}
+
+function addLiveRow(record, { fresh = false } = {}) {
+  if (liveRows.some((r) => r.transaction_id === record.transaction_id)) return;
+  record._fresh = fresh;
+  liveRows.unshift(record);
+  if (liveRows.length > MAX_LIVE_ROWS) liveRows.length = MAX_LIVE_ROWS;
+  renderTransactionsTable();
+}
+
+async function loadInitialLiveHistory() {
+  try {
+    const rows = await API.recentLiveTransactions(50);
+    liveRows = rows.map((r) => ({ ...r, created_at: r.created_at }));
+    renderTransactionsTable();
+  } catch (err) {
+    console.error("Failed to load live history:", err);
+  }
+}
+
+function connectLiveFeed() {
+  setLiveBadge("connecting");
+  const url = API.liveFeedWebSocketUrl();
+  liveSocket = new WebSocket(url);
+
+  liveSocket.onopen = () => {
+    setLiveBadge("live");
+    liveReconnectDelayMs = 1000;
+  };
+  liveSocket.onmessage = (event) => {
+    try {
+      const msg = JSON.parse(event.data);
+      if (msg.type === "transaction") addLiveRow(msg.data, { fresh: true });
+    } catch (err) {
+      console.error("Bad live feed message:", err);
+    }
+  };
+  liveSocket.onclose = () => {
+    setLiveBadge("error");
+    setTimeout(connectLiveFeed, liveReconnectDelayMs);
+    liveReconnectDelayMs = Math.min(liveReconnectDelayMs * 1.5, 15000);
+  };
+  liveSocket.onerror = () => liveSocket.close();
 }
 
 async function scoreNewTransaction() {
@@ -150,9 +226,11 @@ async function scoreNewTransaction() {
       <p>Decision: ${decisionPill(r.decision)} &nbsp; Path: ${r.routed_to_quantum ? "🔮 quantum" : "⚡ classical"}
       &nbsp; Classical latency: ${fmtNum(r.classical_latency_ms, 3)} ms
       ${r.routed_to_quantum ? `&nbsp; Quantum latency: ${fmtNum(r.quantum_latency_ms, 2)} ms` : ""}</p>
-      <p class="muted">Synthetic ground-truth label for this demo transaction: ${r.synthetic_ground_truth_label === 1 ? "FRAUD" : "legitimate"} (for demo transparency only — the pipeline never sees this at inference time).</p>
+      <p class="muted">Synthetic ground-truth label for this demo transaction: ${r.synthetic_ground_truth_label === 1 ? "FRAUD" : "legitimate"} (for demo transparency only — the pipeline never sees this at inference time). This result is also pushed to the live feed table above via the same WebSocket broadcast every other connected client receives.</p>
     `;
-    loadTransactions();
+    // Note: no need to prepend to liveRows here — this same record arrives
+    // via the WebSocket broadcast (server-side, api/routers/transactions.py
+    // broadcasts every manual score too), and addLiveRow() de-dupes by id.
   } catch (err) {
     resultCard.classList.remove("hidden");
     resultCard.innerHTML = `<p>Scoring failed: ${err.message}</p>`;
@@ -378,9 +456,9 @@ document.addEventListener("DOMContentLoaded", () => {
   checkHealth();
   loadOverview();
 
-  document.getElementById("tx-refresh").addEventListener("click", loadTransactions);
-  document.getElementById("tx-decision-filter").addEventListener("change", loadTransactions);
-  document.getElementById("tx-routed-only").addEventListener("change", loadTransactions);
+  loadInitialLiveHistory().then(connectLiveFeed);
+  document.getElementById("tx-decision-filter").addEventListener("change", renderTransactionsTable);
+  document.getElementById("tx-routed-only").addEventListener("change", renderTransactionsTable);
   document.getElementById("tx-amount-mult").addEventListener("input", (e) => {
     document.getElementById("tx-amount-mult-val").textContent = parseFloat(e.target.value).toFixed(1) + "×";
   });

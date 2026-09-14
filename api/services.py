@@ -29,12 +29,13 @@ matplotlib.use("Agg")
 import numpy as np
 import pandas as pd
 
+from api import model_store
 from src.classical.xgboost_model import XGBoostModel
 from src.config.settings import load_experiments_config, load_quantum_config
 from src.data.loaders import load_synthetic
 from src.data.preprocessing import clean_dataframe, fit_transform_split, infer_feature_types, random_split
 from src.evaluation.statistical_tests import drift_status, ks_drift_test, population_stability_index
-from src.hybrid.cost_sensitive_decision import CostModel
+from src.hybrid.cost_sensitive_decision import CostModel, ThresholdConfig
 from src.hybrid.qgfda import QGFDA, QGFDAConfig
 from src.quantum.ansatzes import ANSATZ_NAMES, build_ansatz
 from src.quantum.circuit_metrics import compute_circuit_metrics
@@ -65,6 +66,13 @@ class DemoState:
 
 
 _demo_state: DemoState | None = None
+
+
+def is_ready() -> bool:
+    """Non-blocking readiness check — does NOT acquire the build lock or
+    trigger a build, so a load balancer's readiness probe never itself
+    blocks for 30-60s waiting on the first request to warm the pipeline."""
+    return _demo_state is not None
 
 
 def build_demo_state(n_samples: int = 6000, qubits: int = 3, seed: int = 42) -> DemoState:
@@ -116,13 +124,100 @@ def build_demo_state(n_samples: int = 6000, qubits: int = 3, seed: int = 42) -> 
     )
 
 
+def _rebuild_evaluation_view(
+    transformer, numeric: list[str], categorical: list[str], target: str, n_samples: int, seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Regenerate the SAME synthetic test split used at training time (same
+    seed/n_samples -> same rows out of random_split) and transform it with
+    the already-fitted transformer — no fitting, just fast inference-time
+    preprocessing. Used to repopulate `result`/`frame` on a warm load without
+    ever retraining."""
+    ds = load_synthetic("ulb", n_samples=n_samples, random_state=seed)
+    frame = clean_dataframe(ds.frame, target)
+    splits = random_split(frame, target, test_size=0.2, validation_size=0.15, random_state=seed)
+    test_frame = splits["test"]
+    X_test = transformer.transform(test_frame[numeric + categorical])
+    y_test = test_frame[target].values
+    amounts = test_frame["Amount"].values if "Amount" in test_frame.columns else None
+    return X_test, y_test, amounts
+
+
+def load_demo_state() -> DemoState | None:
+    """Warm-load persisted artifacts (see api/model_store.py) and skip
+    training entirely. Returns None (never raises) if nothing is persisted
+    yet or loading fails for any reason, so the caller can fall back to a
+    full retrain."""
+    if not model_store.is_available():
+        return None
+    try:
+        meta = model_store.load_meta()
+        classical_model = model_store.load_classical_model()
+        transformer = model_store.load_transformer()
+
+        cost_model = CostModel(**meta["cost_model"])
+        config = QGFDAConfig(
+            quantum_feature_indices=meta["quantum_feature_indices"],
+            gate_threshold=meta["gate_threshold"],
+            risk_band=tuple(meta["risk_band"]),
+            max_quantum_fraction=meta["max_quantum_fraction"],
+            fusion_method=meta["fusion_method"],
+            fusion_weights=meta["fusion_weights"],
+            cost_model=cost_model,
+            threshold_search_grid_points=meta["thresholds"]["search_grid_points"],
+            quantum_train_sample_size=150,
+            random_state=meta["random_state"],
+        )
+        qmc = meta["quantum_model_config"]
+        quantum_model = VQCModel(
+            num_qubits=qmc["num_qubits"], feature_map_name=qmc["feature_map_name"],
+            feature_map_reps=qmc["feature_map_reps"], ansatz_name=qmc["ansatz_name"],
+            ansatz_reps=qmc["ansatz_reps"], optimizer=qmc["optimizer"], optimizer_maxiter=1,
+            backend=qmc["backend"], shots=qmc["shots"], seed=qmc["seed"],
+        )
+        quantum_model._estimator = model_store.load_quantum_estimator()  # noqa: SLF001 - trained weights, skips refit
+
+        model = QGFDA(classical_model, quantum_model, config)
+        model.thresholds = ThresholdConfig(**meta["thresholds"])
+        model._is_fit = True  # noqa: SLF001 - loaded from disk, already fit
+
+        X_test, y_test, amounts = _rebuild_evaluation_view(
+            transformer, meta["numeric_features"], meta["categorical_features"], meta["target"],
+            n_samples=6000, seed=meta["random_state"],
+        )
+        result = model.evaluate(X_test, y_test)
+        frame_out = result["predictions"].to_frame(amounts=amounts)
+        frame_out["actual_fraud"] = y_test
+
+        return DemoState(
+            model=model, result=result, frame=frame_out, transformer=transformer,
+            numeric_features=meta["numeric_features"], categorical_features=meta["categorical_features"],
+            target=meta["target"], time_column=meta["time_column"], amount_column=meta["amount_column"],
+        )
+    except Exception:  # noqa: BLE001 - any load failure must fall back to a full retrain, not crash
+        logger.exception("Failed to warm-load persisted demo pipeline; will train a fresh one instead.")
+        return None
+
+
 def get_demo_state(force_rebuild: bool = False) -> DemoState:
     global _demo_state
     with _lock:
-        if _demo_state is None or force_rebuild:
-            logger.info("Building demo QGFDA pipeline (this trains a small VQC, ~30-60s)...")
-            _demo_state = build_demo_state()
-            logger.info("Demo pipeline ready.")
+        if _demo_state is not None and not force_rebuild:
+            return _demo_state
+
+        if not force_rebuild:
+            warm = load_demo_state()
+            if warm is not None:
+                logger.info("Warm-loaded persisted demo pipeline from models/demo_pipeline/ (training skipped).")
+                _demo_state = warm
+                return _demo_state
+
+        logger.info("Building demo QGFDA pipeline from scratch (trains a small VQC, ~30-60s)...")
+        _demo_state = build_demo_state()
+        try:
+            model_store.save(_demo_state)
+        except Exception:  # noqa: BLE001 - persistence is a nice-to-have, never fatal
+            logger.exception("Failed to persist demo pipeline artifacts (will retrain on next restart).")
+        logger.info("Demo pipeline ready.")
         return _demo_state
 
 

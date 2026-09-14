@@ -62,6 +62,7 @@
 
     <section id="tab-transactions" class="tab-panel">
       <div class="card controls-row">
+        <span id="live-feed-badge" class="pill">● connecting…</span>
         <label>Filter decision:
           <select id="tx-decision-filter">
             <option value="">All</option>
@@ -71,7 +72,6 @@
           </select>
         </label>
         <label><input type="checkbox" id="tx-routed-only" /> Quantum-routed only</label>
-        <button id="tx-refresh" class="btn">Refresh table</button>
         <span class="spacer"></span>
         <label>Amount multiplier: <span id="tx-amount-mult-val">1.0×</span>
           <input type="range" id="tx-amount-mult" min="0.1" max="10" step="0.1" value="1.0" />
@@ -80,9 +80,10 @@
       </div>
       <div id="tx-score-result" class="card result-card hidden"></div>
       <div class="card">
+        <p class="muted">Streaming live via WebSocket — a fresh synthetic transaction is scored through the actual QGFDA pipeline roughly every few seconds and pushed here automatically. No refresh needed.</p>
         <table class="data-table" id="tx-table">
           <thead>
-            <tr><th>Transaction ID</th><th>Amount</th><th>Classical Risk</th><th>Quantum Risk</th><th>Final Risk</th><th>Path</th><th>Decision</th></tr>
+            <tr><th>Transaction ID</th><th>Time</th><th>Amount</th><th>Classical Risk</th><th>Quantum Risk</th><th>Final Risk</th><th>Path</th><th>Decision</th></tr>
           </thead>
           <tbody></tbody>
         </table>

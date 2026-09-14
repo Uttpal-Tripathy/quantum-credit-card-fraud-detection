@@ -1,0 +1,31 @@
+services:
+  qgfda-api:
+    build: .
+    image: qgfda-api:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - API_CORS_ORIGINS=${API_CORS_ORIGINS:-*}
+      - LIVE_FEED_INTERVAL_SECONDS=${LIVE_FEED_INTERVAL_SECONDS:-3}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-20}
+      - IBM_QUANTUM_TOKEN=${IBM_QUANTUM_TOKEN:-}
+      - IBM_QUANTUM_INSTANCE=${IBM_QUANTUM_INSTANCE:-}
+    volumes:
+      # Persist the trained demo pipeline + live-feed database across
+      # container restarts/rebuilds instead of retraining every cold start.
+      - qgfda-models:/app/models
+      - qgfda-data:/app/api/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 90s
+      retries: 3
+
+volumes:
+  qgfda-models:
+  qgfda-data:

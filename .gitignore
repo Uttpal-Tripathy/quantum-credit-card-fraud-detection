@@ -20,11 +20,17 @@ data/interim/*
 data/processed/*
 !data/processed/.gitkeep
 
-# Models (can be large; regenerate via experiments)
+# Models (can be large; regenerate via experiments, or via the API's
+# auto-persisted demo pipeline artifacts under models/demo_pipeline/)
 models/*.joblib
 models/*.pkl
 models/*.json
+models/demo_pipeline/
 !models/.gitkeep
+
+# API-local runtime data (SQLite live-transaction feed)
+api/data/
+*.sqlite3
 
 # Experiment artifacts
 experiments/results/*

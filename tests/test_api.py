@@ -11,7 +11,15 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 
+# Entering TestClient as a context manager runs the app's lifespan (DB init,
+# background live-feed task, demo-pipeline prewarm thread) exactly like a
+# real server start, rather than skipping straight to route handling. Not
+# explicitly exiting is fine here: the test process exits right after the
+# suite finishes, which tears down the background thread/loop anyway —
+# calling __exit__() during Python's own atexit sequence raced with logging
+# module teardown and produced cosmetic "Logging error" noise instead.
 client = TestClient(app)
+client.__enter__()
 
 
 def test_health():
@@ -131,3 +139,64 @@ def test_experiments_list_and_export():
     resp_csv = client.get("/api/experiments/export.csv")
     assert resp_csv.status_code == 200
     assert "text/csv" in resp_csv.headers["content-type"]
+
+
+# ------------------------------------------------ production hardening ----
+
+def test_readiness_probe_reflects_pipeline_state():
+    # The demo pipeline has already been touched by earlier tests in this
+    # module (get_demo_state() is a process-wide singleton), so by this
+    # point readiness should be true.
+    resp = client.get("/api/ready")
+    assert resp.status_code == 200
+    assert resp.json()["ready"] is True
+
+
+def test_docs_are_enabled_outside_production():
+    # ENVIRONMENT defaults to "development" unless explicitly overridden.
+    resp = client.get("/docs")
+    assert resp.status_code == 200
+
+
+def test_rate_limit_headers_absent_below_threshold():
+    # A handful of quick circuit-build calls should not trip the default
+    # 20/min limit.
+    for _ in range(3):
+        resp = client.post("/api/quantum/circuit", json={
+            "feature_map": "z", "ansatz": "real_amplitudes", "qubits": 2, "reps": 1,
+        })
+        assert resp.status_code == 200
+
+
+# ------------------------------------------------------- real-time feed --
+
+def test_live_recent_and_status_endpoints():
+    resp = client.get("/api/transactions/live/recent", params={"limit": 10})
+    assert resp.status_code == 200
+    assert isinstance(resp.json(), list)
+
+    resp_status = client.get("/api/transactions/live/status")
+    assert resp_status.status_code == 200
+    body = resp_status.json()
+    assert "active_websocket_connections" in body
+    assert "total_recorded" in body
+
+
+def test_manual_score_persists_to_live_history():
+    before = client.get("/api/transactions/live/status").json()["total_recorded"]
+    resp = client.post("/api/transactions/score", json={"amount_multiplier": 1.0})
+    assert resp.status_code == 200
+    after = client.get("/api/transactions/live/status").json()["total_recorded"]
+    assert after == before + 1
+
+
+def test_websocket_receives_a_transaction_push():
+    """The background broadcaster (api/live_feed.py) ticks every
+    LIVE_FEED_INTERVAL_SECONDS; connecting and waiting for one message
+    confirms the whole real-time path (score -> persist -> broadcast) works
+    end-to-end, not just the REST fallback."""
+    with client.websocket_connect("/ws/live") as websocket:
+        msg = websocket.receive_json()
+        assert msg["type"] == "transaction"
+        assert "transaction_id" in msg["data"]
+        assert msg["data"]["decision"] in ("APPROVE", "REVIEW", "BLOCK")

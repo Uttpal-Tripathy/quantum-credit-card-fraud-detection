@@ -33,6 +33,16 @@ const API = {
       body: JSON.stringify({ amount_multiplier: amountMultiplier }),
     });
   },
+  recentLiveTransactions(limit = 50) {
+    return this._req(`/transactions/live/recent?limit=${limit}`);
+  },
+  liveFeedStatus() {
+    return this._req("/transactions/live/status");
+  },
+  liveFeedWebSocketUrl() {
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/ws/live`;
+  },
 
   quantumSummary() { return this._req("/quantum/summary"); },
   buildCircuit(payload) {
